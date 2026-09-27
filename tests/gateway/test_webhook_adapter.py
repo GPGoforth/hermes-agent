@@ -194,6 +194,28 @@ class TestValidateSignature:
         req = _mock_request(headers={"X-Gitlab-Token": secret})
         assert adapter._validate_signature(req, b"{}", secret) is True
 
+    def test_bearer_token_valid_accepts(self):
+        """Authorization: Bearer <secret> authenticates like X-Gitlab-Token —
+        for senders that can set standard auth headers but not HMAC
+        (e.g. Prometheus Alertmanager http_config.authorization)."""
+        adapter = _make_adapter()
+        secret = "am-route-token-42"
+        req = _mock_request(headers={"Authorization": f"Bearer {secret}"})
+        assert adapter._validate_signature(req, b"{}", secret) is True
+
+    def test_bearer_token_mismatch_rejects(self):
+        """A Bearer token that doesn't match the route secret fails closed."""
+        adapter = _make_adapter()
+        req = _mock_request(headers={"Authorization": "Bearer attacker-token"})
+        assert adapter._validate_signature(req, b"{}", "real-secret") is False
+
+    def test_non_ascii_bearer_token_rejects_without_raising(self):
+        """Bearer values are attacker-controlled; a non-ASCII token must
+        reject (False), not raise in compare_digest."""
+        adapter = _make_adapter()
+        req = _mock_request(headers={"Authorization": "Bearer ské-not-a-token"})
+        assert adapter._validate_signature(req, b"{}", "real-secret") is False
+
 
     def test_validate_generic_v2_wrong_timestamp_rejects(self):
         """The timestamp is cryptographically bound into the V2 signature —

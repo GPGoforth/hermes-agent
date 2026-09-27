@@ -727,6 +727,12 @@ class WebhookAdapter(BasePlatformAdapter):
                 (headers.get("X-Gitlab-Token", ""), lambda: secret)):
             if provided:
                 return _hmac_str_equal(provided, expected())
+        # Bearer token (Authorization: Bearer <token>): plain-compare against the route secret,
+        # the same trust model as X-Gitlab-Token. Lets senders that can set standard auth headers
+        # but not HMAC (e.g. Prometheus Alertmanager http_config.authorization) use the route.
+        authorization = _header("Authorization")
+        if authorization.startswith("Bearer "):
+            return _hmac_str_equal(authorization[len("Bearer "):].strip(), secret)
         route_name = request.match_info.get("route_name", "")
         # Generic V2: X-Webhook-Signature-V2 = hex HMAC-SHA256 of "<timestamp>.<body>", X-Webhook-Timestamp
         # required. Presence of the V2 header COMMITS to V2 — it must not fall through to V1 on a
