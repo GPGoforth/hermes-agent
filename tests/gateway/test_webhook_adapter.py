@@ -393,6 +393,64 @@ class TestEventFilter:
 
 
 # ===================================================================
+# List payloads (JSON array bodies)
+# ===================================================================
+
+
+class TestListPayloads:
+    """Senders like Prometheus Alertmanager POST a JSON LIST of alert objects.
+    The adapter must accept it (route to the agent / script) rather than
+    crash on payload.get() during event-type detection."""
+
+    @pytest.mark.asyncio
+    async def test_list_payload_accepted(self):
+        """A JSON array body dispatches instead of raising AttributeError
+        (observed live: 'list' object has no attribute 'get')."""
+        routes = {
+            "am": {
+                "secret": _INSECURE_NO_AUTH,
+                "prompt": "Alerts: {__raw__}",
+            }
+        }
+        adapter = _make_adapter(routes=routes)
+        adapter.handle_message = AsyncMock()
+
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/webhooks/am",
+                json=[{"labels": {"alertname": "MonitorDown", "service": "x"}}],
+            )
+            assert resp.status == 202
+            adapter.handle_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_list_payload_with_event_filter_uses_unknown(self):
+        """A list body has no event_type fields; with an events allowlist that
+        doesn't include 'unknown', the request is ignored (200), not a 500."""
+        routes = {
+            "am": {
+                "secret": _INSECURE_NO_AUTH,
+                "events": ["pull_request"],
+                "prompt": "should not run",
+            }
+        }
+        adapter = _make_adapter(routes=routes)
+        adapter.handle_message = AsyncMock()
+
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/webhooks/am",
+                json=[{"labels": {"alertname": "MonitorDown"}}],
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data.get("status") == "ignored"
+            adapter.handle_message.assert_not_called()
+
+
+# ===================================================================
 # Payload filters
 # ===================================================================
 
